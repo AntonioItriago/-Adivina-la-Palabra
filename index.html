@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Adivina la Palabra 🇻🇪</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      --bg: var(--tg-theme-bg-color, #1a1a1a);
+      --text: var(--tg-theme-text-color, #ffffff);
+      --secondary: var(--tg-theme-hint-color, #aaaaaa);
+      --accent: var(--tg-theme-button-color, #5b8cff);
+      --correct: #538d4e;
+      --present: #b59f3b;
+      --absent: #3a3a3a;
+      --tile-border: #555;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 10px;
+      user-select: none;
+    }
+
+    header {
+      width: 100%;
+      text-align: center;
+      padding: 8px 0 12px;
+      border-bottom: 1px solid var(--tile-border);
+      margin-bottom: 12px;
+    }
+    header h1 { font-size: 1.3rem; letter-spacing: 1px; }
+    header p { font-size: 0.75rem; color: var(--secondary); margin-top: 4px; }
+
+    #board {
+      display: grid;
+      grid-template-rows: repeat(6, 1fr);
+      gap: 6px;
+      margin-bottom: 16px;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 6px;
+    }
+    .tile {
+      width: 56px;
+      height: 56px;
+      border: 2px solid var(--tile-border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.8rem;
+      font-weight: bold;
+      text-transform: uppercase;
+      transition: transform 0.4s ease, background 0.3s;
+      background: transparent;
+    }
+    .tile.filled { border-color: #888; animation: pop 0.1s; }
+    .tile.correct { background: var(--correct); border-color: var(--correct); }
+    .tile.present { background: var(--present); border-color: var(--present); }
+    .tile.absent  { background: var(--absent);  border-color: var(--absent); }
+    .tile.flip    { animation: flip 0.6s ease forwards; }
+
+    @keyframes pop { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+    @keyframes flip {
+      0%   { transform: rotateX(0); }
+      50%  { transform: rotateX(90deg); }
+      100% { transform: rotateX(0); }
+    }
+
+    #message {
+      min-height: 24px;
+      font-size: 0.9rem;
+      color: var(--accent);
+      margin-bottom: 10px;
+      text-align: center;
+    }
+
+    #keyboard {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      width: 100%;
+      max-width: 500px;
+    }
+    .kb-row { display: flex; justify-content: center; gap: 4px; }
+    .key {
+      flex: 1;
+      min-width: 28px;
+      height: 48px;
+      border: none;
+      border-radius: 6px;
+      background: #555;
+      color: #fff;
+      font-size: 0.95rem;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .key.wide { flex: 1.6; font-size: 0.75rem; }
+    .key:active { opacity: 0.7; }
+    .key.correct { background: var(--correct); }
+    .key.present { background: var(--present); }
+    .key.absent  { background: var(--absent); color: #777; }
+
+    #controls {
+      display: flex;
+      gap: 10px;
+      margin-top: 14px;
+      width: 100%;
+      max-width: 500px;
+    }
+    .btn {
+      flex: 1;
+      padding: 10px;
+      border: none;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #fff;
+      font-weight: bold;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .btn.secondary { background: #444; }
+
+    #stats {
+      margin-top: 12px;
+      font-size: 0.8rem;
+      color: var(--secondary);
+      text-align: center;
+    }
+
+    /* Modal pista */
+    #modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.75);
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    #modal.active { display: flex; }
+    .modal-box {
+      background: #222;
+      padding: 20px;
+      border-radius: 12px;
+      max-width: 320px;
+      text-align: center;
+    }
+    .modal-box h2 { margin-bottom: 10px; font-size: 1.1rem; }
+    .modal-box p { margin-bottom: 16px; color: var(--secondary); font-size: 0.9rem; }
+    .modal-box .btn { margin-top: 6px; }
+
+    @media (max-width: 380px) {
+      .tile { width: 48px; height: 48px; font-size: 1.5rem; }
+      .key { height: 44px; font-size: 0.85rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>Adivina la Palabra 🇻🇪</h1>
+    <p>Modismos y léxico venezolano · 5 letras · 6 intentos</p>
+  </header>
+
+  <div id="board"></div>
+  <div id="message"></div>
+
+  <div id="keyboard"></div>
+
+  <div id="controls">
+    <button class="btn secondary" id="btnHint">💡 Pista Gratis</button>
+    <button class="btn" id="btnReset">🔄 Nueva Partida</button>
+  </div>
+
+  <div id="stats">Partidas: <span id="statGames">0</span> · Ganadas: <span id="statWins">0</span></div>
+
+  <!-- Modal para pista -->
+  <div id="modal">
+    <div class="modal-box">
+      <h2 id="modalTitle">💡 Pista Gratis</h2>
+      <p id="modalText">Mira un anuncio corto para revelar una letra correcta.</p>
+      <button class="btn" id="modalAccept">Ver anuncio</button>
+      <button class="btn secondary" id="modalCancel" style="margin-top:8px;">Cancelar</button>
+    </div>
+  </div>
+
+<script>
+/* =========================================================
+   1. INICIALIZACIÓN TELEGRAM
+========================================================= */
+const tg = window.Telegram?.WebApp;
+if (tg) {
+  tg.ready();
+  tg.expand();
+  tg.enableClosingConfirmation?.();
+  // Ajustar colores al tema del usuario (opcional)
+  document.body.style.setProperty('--bg', tg.themeParams?.bg_color || '#1a1a1a');
+  document.body.style.setProperty('--text', tg.themeParams?.text_color || '#ffffff');
+  document.body.style.setProperty('--accent', tg.themeParams?.button_color || '#5b8cff');
+}
+
+/* =========================================================
+   2. DICCIONARIO VENEZOLANO (5 letras)
+========================================================= */
+const PALABRAS = [
+  "AREPA","CHAMO","PANAS","COROS","CACHE","GUASA","TUREO","JORAI",
+  "NAVEO","MANGO","GUARO","PELAO","BONGO","RUMBA","CAÑAS","GUAYO",
+  "CACAO","PAVAS","TUMBA","RUMBO","SABOR","TAPAO","VACAS","LLENA",
+  "BUCHE","CHIVA","PARRA","BATEO","MAMBO","TALCO","BULLA","CAUSA",
+  "PILLA","RASPA","TIRAO","BICHO","CHORO","TAPON","BARRA","CHAPA",
+  "GUISO","LLORO","PINTA","TUMBO","YAREY","ZUMBA","FRESA","CAMBO",
+  "CHOLA","FUNDA","GORDA","JEFEA","LATAS","MONOS","ÑANGO","PAPAS",
+  "RAJAS","SALSA","TAPAS","VIEJO","YUCA","ZANJA","BOLSA","CARNE",
+  "DULCE","FARSA","GUSTO","HUECO","JUGAR","LIMON","MUNDO","NARIZ",
+  "OPACO","PASTO","QUESO","RATON","SUELO","TIGRE","UNIDO","VALER"
+].filter(p => p.length === 5); // filtro de seguridad
+
+/* =========================================================
+   3. ESTADO DEL JUEGO
+========================================================= */
+const MAX_INTENTOS = 6;
+const LONG_PALABRA = 5;
+
+let estado = {
+  palabraSecreta: "",
+  intentos: [],          // array de strings (cada intento)
+  filaActual: 0,
+  letraActual: 0,
+  terminado: false,
+  tecladoEstado: {},     // letra -> 'correct' | 'present' | 'absent'
+  pistaUsada: false
+};
+
+/* =========================================================
+   4. RENDERIZADO
+========================================================= */
+const boardEl = document.getElementById('board');
+const kbEl    = document.getElementById('keyboard');
+const msgEl   = document.getElementById('message');
+
+function construirTablero() {
+  boardEl.innerHTML = '';
+  for (let i = 0; i < MAX_INTENTOS; i++) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    for (let j = 0; j < LONG_PALABRA; j++) {
+      const tile = document.createElement('div');
+      tile.className = 'tile';
+      tile.dataset.row = i;
+      tile.dataset.col = j;
+      row.appendChild(tile);
+    }
+    boardEl.appendChild(row);
+  }
+}
+
+const FILAS_TECLADO = ["QWERTYUIOP","ASDFGHJKLÑ","ZXCVBNM"];
+function construirTeclado() {
+  kbEl.innerHTML = '';
+  FILAS_TECLADO.forEach((fila, idx) => {
+    const row = document.createElement('div');
+    row.className = 'kb-row';
+    if (idx === 2) {
+      const enter = document.createElement('button');
+      enter.className = 'key wide';
+      enter.textContent = 'ENVIAR';
+      enter.dataset.key = 'ENTER';
+      enter.onclick = manejarEnter;
+      row.appendChild(enter);
+    }
+    fila.split('').forEach(letra => {
+      const k = document.createElement('button');
+      k.className = 'key';
+      k.textContent = letra;
+      k.dataset.key = letra;
+      k.onclick = () => manejarLetra(letra);
+      row.appendChild(k);
+    });
+    if (idx === 2) {
+      const del = document.createElement('button');
+      del.className = 'key wide';
+      del.textContent = '⌫';
+      del.dataset.key = 'BACK';
+      del.onclick = manejarBorrar;
+      row.appendChild(del);
+    }
+    kbEl.appendChild(row);
+  });
+}
+
+function actualizarTile(fila, col, letra, estadoTile) {
+  const tile = boardEl.children[fila]?.children[col];
+  if (!tile) return;
+  tile.textContent = letra;
+  if (letra) tile.classList.add('filled');
+  if (estadoTile) {
+    tile.classList.add('flip');
+    setTimeout(() => {
+      tile.classList.add(estadoTile);
+    }, 300);
+  }
+}
+
+function actualizarTeclado(letra, estadoTile) {
+  const prioridad = { 'correct': 3, 'present': 2, 'absent': 1 };
+  const actual = estado.tecladoEstado[letra];
+  if (!actual || prioridad[estadoTile] > prioridad[actual]) {
+    estado.tecladoEstado[letra] = estadoTile;
+  }
+  const key = kbEl.querySelector(`.key[data-key="${letra}"]`);
+  if (key) {
+    key.classList.remove('correct','present','absent');
+    key.classList.add(estado.tecladoEstado[letra]);
+  }
+}
+
+function mostrarMensaje(txt, duracion = 1500) {
+  msgEl.textContent = txt;
+  if (duracion > 0) setTimeout(() => { if (msgEl.textContent === txt) msgEl.textContent = ''; }, duracion);
+}
+
+/* =========================================================
+   5. LÓGICA DE JUEGO
+========================================================= */
+function manejarLetra(letra) {
+  if (estado.terminado) return;
+  if (estado.letraActual >= LONG_PALABRA) return;
+  const fila = estado.filaActual;
+  const col = estado.letraActual;
+  if (!estado.intentos[fila]) estado.intentos[fila] = "";
+  estado.intentos[fila] += letra;
+  actualizarTile(fila, col, letra);
+  estado.letraActual++;
+  tg?.HapticFeedback?.selectionChanged?.();
+}
+
+function manejarBorrar() {
+  if (estado.terminado) return;
+  if (estado.letraActual === 0) return;
+  estado.letraActual--;
+  const fila = estado.filaActual;
+  const col = estado.letraActual;
+  estado.intentos[fila] = estado.intentos[fila].slice(0, -1);
+  const tile = boardEl.children[fila]?.children[col];
+  if (tile) {
+    tile.textContent = "";
+    tile.classList.remove('filled');
+  }
+  tg?.HapticFeedback?.selectionChanged?.();
+}
+
+function manejarEnter() {
+  if (estado.terminado) return;
+  const intento = estado.intentos[estado.filaActual] || "";
+  if (intento.length !== LONG_PALABRA) {
+    mostrarMensaje("Faltan letras");
+    tg?.HapticFeedback?.notificationOccurred?.('error');
+    return;
+  }
+  evaluarIntento(intento);
+}
+
+function evaluarIntento(intento) {
+  const secreta = estado.palabraSecreta;
+  const resultado = Array(LONG_PALABRA).fill('absent');
+  const secretaArr = secreta.split('');
+  const intentoArr = intento.split('');
+
+  // 1ra pasada: verdes
+  intentoArr.forEach((l, i) => {
+    if (l === secretaArr[i]) {
+      resultado[i] = 'correct';
+      secretaArr[i] = null;
+    }
+  });
+  // 2da pasada: amarillos
+  intentoArr.forEach((l, i) => {
+    if (resultado[i] === 'correct') return;
+    const idx = secretaArr.indexOf(l);
+    if (idx !== -1) {
+      resultado[i] = 'present';
+      secretaArr[idx] = null;
+    }
+  });
+
+  // Render con delay para animación
+  intentoArr.forEach((l, i) => {
+    setTimeout(() => {
+      actualizarTile(estado.filaActual, i, l, resultado[i]);
+      actualizarTeclado(l, resultado[i]);
+    }, i * 250);
+  });
+
+  setTimeout(() => {
+    if (intento === secreta) {
+      estado.terminado = true;
+      mostrarMensaje("¡Ganaste! 🎉", 0);
+      tg?.HapticFeedback?.notificationOccurred?.('success');
+      registrarPartida(true);
+    } else if (estado.filaActual === MAX_INTENTOS - 1) {
+      estado.terminado = true;
+      mostrarMensaje(`Era: ${secreta}`, 0);
+      tg?.HapticFeedback?.notificationOccurred?.('error');
+      registrarPartida(false);
+    } else {
+      estado.filaActual++;
+      estado.letraActual = 0;
+      estado.intentos[estado.filaActual] = "";
+    }
+  }, LONG_PALABRA * 250 + 200);
+}
+
+/* =========================================================
+   6. PISTA (REWARDED VIDEO PLACEHOLDER)
+========================================================= */
+const modal = document.getElementById('modal');
+const modalAccept = document.getElementById('modalAccept');
+const modalCancel = document.getElementById('modalCancel');
+
+document.getElementById('btnHint').onclick = () => {
+  if (estado.terminado) { mostrarMensaje("Inicia una partida nueva"); return; }
+  if (estado.pistaUsada) { mostrarMensaje("Solo 1 pista por partida"); return; }
+  modal.classList.add('active');
+};
+modalCancel.onclick = () => modal.classList.remove('active');
+modalAccept.onclick = () => {
+  modal.classList.remove('active');
+  mostrarRecompensa();
+};
+
+function mostrarRecompensa() {
+  // ⚠️ PLACEHOLDER: Aquí se integra Adsgram / Monetag / Telegram Ads
+  // Ejemplo con Adsgram:
+  // AdController.show().then(reward => { if (reward) aplicarPista(); });
+  
+  // Simulación: tras 1s se otorga la pista
+  mostrarMensaje("Cargando anuncio...");
+  setTimeout(() => {
+    aplicarPista();
+  }, 1000);
+}
+
+function aplicarPista() {
+  // Revela la primera letra no descubierta correctamente
+  const fila = estado.filaActual;
+  for (let c = 0; c < LONG_PALABRA; c++) {
+    const tile = boardEl.children[fila]?.children[c];
+    if (!tile) continue;
+    const letraActual = tile.textContent;
+    const letraCorrecta = estado.palabraSecreta[c];
+    if (letraActual !== letraCorrecta) {
+      // Rellenar esa letra en el intento actual
+      const intento = (estado.intentos[fila] || "").padEnd(c, "_");
+      estado.intentos[fila] = intento.substring(0, c) + letraCorrecta + intento.substring(c + 1);
+      actualizarTile(fila, c, letraCorrecta, 'correct');
+      actualizarTeclado(letraCorrecta, 'correct');
+      estado.letraActual = Math.max(estado.letraActual, c + 1);
+      estado.pistaUsada = true;
+      mostrarMensaje("¡Letra revelada!");
+      tg?.HapticFeedback?.notificationOccurred?.('success');
+      return;
+    }
+  }
+}
+
+/* =========================================================
+   7. CONTADOR DE PARTIDAS + INTERSTITIAL PLACEHOLDER
+========================================================= */
+function registrarPartida(ganada) {
+  const stats = JSON.parse(localStorage.getItem('statsAV') || '{"games":0,"wins":0}');
+  stats.games++;
+  if (ganada) stats.wins++;
+  localStorage.setItem('statsAV', JSON.stringify(stats));
+  document.getElementById('statGames').textContent = stats.games;
+  document.getElementById('statWins').textContent = stats.wins;
+
+  // Interstitial cada 3 partidas
+  if (stats.games % 3 === 0) {
+    mostrarInterstitial();
+  }
+}
+
+function mostrarInterstitial() {
+  // ⚠️ PLACEHOLDER: integrar red publicitaria real
+  // Ejemplo: AdController.showInterstitial();
+  console.log("[ADS] Interstitial debería mostrarse aquí");
+  mostrarMensaje("📢 (Anuncio interstitial)", 2000);
+}
+
+/* =========================================================
+   8. INICIO / REINICIO
+========================================================= */
+function nuevaPartida() {
+  estado = {
+    palabraSecreta: PALABRAS[Math.floor(Math.random() * PALABRAS.length)],
+    intentos: [""],
+    filaActual: 0,
+    letraActual: 0,
+    terminado: false,
+    tecladoEstado: {},
+    pistaUsada: false
+  };
+  construirTablero();
+  // Resetear teclado visual
+  document.querySelectorAll('.key').forEach(k => k.classList.remove('correct','present','absent'));
+  msgEl.textContent = '';
+  console.log("[DEBUG] Palabra:", estado.palabraSecreta); // quitar en producción
+}
+
+document.getElementById('btnReset').onclick = () => {
+  nuevaPartida();
+  tg?.HapticFeedback?.impactOccurred?.('light');
+};
+
+/* =========================================================
+   9. INPUT POR TECLADO FÍSICO (útil en pruebas web)
+========================================================= */
+document.addEventListener('keydown', (e) => {
+  const k = e.key.toUpperCase();
+  if (k === 'ENTER') manejarEnter();
+  else if (k === 'BACKSPACE') manejarBorrar();
+  else if (/^[A-ZÑ]$/.test(k)) manejarLetra(k);
+});
+
+/* =========================================================
+   10. BOOT
+========================================================= */
+construirTeclado();
+nuevaPartida();
+const stats = JSON.parse(localStorage.getItem('statsAV') || '{"games":0,"wins":0}');
+document.getElementById('statGames').textContent = stats.games;
+document.getElementById('statWins').textContent = stats.wins;
+</script>
+</body>
+</html>
