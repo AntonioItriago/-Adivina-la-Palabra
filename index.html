@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Adivina la Palabra 🇻🇪</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <!-- Monetag SDK -->
+  <script src='//libtl.com/sdk.js' data-zone='12017670' data-sdk='show_12017670'></script>
   <style>
     :root {
       --bg: var(--tg-theme-bg-color, #1a1a1a);
@@ -13,7 +15,7 @@
       --accent: var(--tg-theme-button-color, #5b8cff);
       --correct: #538d4e;
       --present: #b59f3b;
-      --absent: #3a3a3a;
+      --absent: #3a3a3c;
       --tile-border: #555;
     }
 
@@ -132,6 +134,7 @@
       font-size: 0.9rem;
     }
     .btn.secondary { background: #444; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
     #stats {
       margin-top: 12px;
@@ -162,6 +165,18 @@
     .modal-box p { margin-bottom: 16px; color: var(--secondary); font-size: 0.9rem; }
     .modal-box .btn { margin-top: 6px; }
 
+    /* Spinner de carga */
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid #555;
+      border-top: 4px solid var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 10px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
     @media (max-width: 380px) {
       .tile { width: 48px; height: 48px; font-size: 1.5rem; }
       .key { height: 44px; font-size: 0.85rem; }
@@ -171,7 +186,7 @@
 <body>
 
   <header>
-    <h1>Adivina la Palabra 🇻🇪</h1>
+    <h1>Adivina la Palabra 🇻</h1>
     <p>Modismos y léxico venezolano · 5 letras · 6 intentos</p>
   </header>
 
@@ -182,7 +197,7 @@
 
   <div id="controls">
     <button class="btn secondary" id="btnHint">💡 Pista Gratis</button>
-    <button class="btn" id="btnReset">🔄 Nueva Partida</button>
+    <button class="btn" id="btnReset"> Nueva Partida</button>
   </div>
 
   <div id="stats">Partidas: <span id="statGames">0</span> · Ganadas: <span id="statWins">0</span></div>
@@ -206,7 +221,6 @@ if (tg) {
   tg.ready();
   tg.expand();
   tg.enableClosingConfirmation?.();
-  // Ajustar colores al tema del usuario (opcional)
   document.body.style.setProperty('--bg', tg.themeParams?.bg_color || '#1a1a1a');
   document.body.style.setProperty('--text', tg.themeParams?.text_color || '#ffffff');
   document.body.style.setProperty('--accent', tg.themeParams?.button_color || '#5b8cff');
@@ -226,7 +240,7 @@ const PALABRAS = [
   "RAJAS","SALSA","TAPAS","VIEJO","YUCA","ZANJA","BOLSA","CARNE",
   "DULCE","FARSA","GUSTO","HUECO","JUGAR","LIMON","MUNDO","NARIZ",
   "OPACO","PASTO","QUESO","RATON","SUELO","TIGRE","UNIDO","VALER"
-].filter(p => p.length === 5); // filtro de seguridad
+].filter(p => p.length === 5);
 
 /* =========================================================
    3. ESTADO DEL JUEGO
@@ -236,12 +250,13 @@ const LONG_PALABRA = 5;
 
 let estado = {
   palabraSecreta: "",
-  intentos: [],          // array de strings (cada intento)
+  intentos: [],
   filaActual: 0,
   letraActual: 0,
   terminado: false,
-  tecladoEstado: {},     // letra -> 'correct' | 'present' | 'absent'
-  pistaUsada: false
+  tecladoEstado: {},
+  pistaUsada: false,
+  adLoading: false
 };
 
 /* =========================================================
@@ -336,25 +351,23 @@ function mostrarMensaje(txt, duracion = 1500) {
    5. LÓGICA DE JUEGO
 ========================================================= */
 function manejarLetra(letra) {
-  if (estado.terminado) return;
+  if (estado.terminado || estado.adLoading) return;
   if (estado.letraActual >= LONG_PALABRA) return;
   const fila = estado.filaActual;
-  const col = estado.letraActual;
   if (!estado.intentos[fila]) estado.intentos[fila] = "";
   estado.intentos[fila] += letra;
-  actualizarTile(fila, col, letra);
+  actualizarTile(fila, estado.letraActual, letra);
   estado.letraActual++;
   tg?.HapticFeedback?.selectionChanged?.();
 }
 
 function manejarBorrar() {
-  if (estado.terminado) return;
+  if (estado.terminado || estado.adLoading) return;
   if (estado.letraActual === 0) return;
   estado.letraActual--;
   const fila = estado.filaActual;
-  const col = estado.letraActual;
   estado.intentos[fila] = estado.intentos[fila].slice(0, -1);
-  const tile = boardEl.children[fila]?.children[col];
+  const tile = boardEl.children[fila]?.children[estado.letraActual];
   if (tile) {
     tile.textContent = "";
     tile.classList.remove('filled');
@@ -363,7 +376,7 @@ function manejarBorrar() {
 }
 
 function manejarEnter() {
-  if (estado.terminado) return;
+  if (estado.terminado || estado.adLoading) return;
   const intento = estado.intentos[estado.filaActual] || "";
   if (intento.length !== LONG_PALABRA) {
     mostrarMensaje("Faltan letras");
@@ -379,14 +392,12 @@ function evaluarIntento(intento) {
   const secretaArr = secreta.split('');
   const intentoArr = intento.split('');
 
-  // 1ra pasada: verdes
   intentoArr.forEach((l, i) => {
     if (l === secretaArr[i]) {
       resultado[i] = 'correct';
       secretaArr[i] = null;
     }
   });
-  // 2da pasada: amarillos
   intentoArr.forEach((l, i) => {
     if (resultado[i] === 'correct') return;
     const idx = secretaArr.indexOf(l);
@@ -396,7 +407,6 @@ function evaluarIntento(intento) {
     }
   });
 
-  // Render con delay para animación
   intentoArr.forEach((l, i) => {
     setTimeout(() => {
       actualizarTile(estado.filaActual, i, l, resultado[i]);
@@ -424,7 +434,7 @@ function evaluarIntento(intento) {
 }
 
 /* =========================================================
-   6. PISTA (REWARDED VIDEO PLACEHOLDER)
+   6. MONETAG - REWARDED VIDEO (PISTA)
 ========================================================= */
 const modal = document.getElementById('modal');
 const modalAccept = document.getElementById('modalAccept');
@@ -433,28 +443,45 @@ const modalCancel = document.getElementById('modalCancel');
 document.getElementById('btnHint').onclick = () => {
   if (estado.terminado) { mostrarMensaje("Inicia una partida nueva"); return; }
   if (estado.pistaUsada) { mostrarMensaje("Solo 1 pista por partida"); return; }
+  if (estado.adLoading) return;
   modal.classList.add('active');
 };
 modalCancel.onclick = () => modal.classList.remove('active');
+
 modalAccept.onclick = () => {
   modal.classList.remove('active');
   mostrarRecompensa();
 };
 
 function mostrarRecompensa() {
-  // ⚠️ PLACEHOLDER: Aquí se integra Adsgram / Monetag / Telegram Ads
-  // Ejemplo con Adsgram:
-  // AdController.show().then(reward => { if (reward) aplicarPista(); });
-  
-  // Simulación: tras 1s se otorga la pista
-  mostrarMensaje("Cargando anuncio...");
-  setTimeout(() => {
-    aplicarPista();
-  }, 1000);
+  if (estado.adLoading) return;
+  estado.adLoading = true;
+  mostrarMensaje("Cargando anuncio...", 0);
+  tg?.HapticFeedback?.impactOccurred?.('light');
+
+  // Verificar que el SDK de Monetag esté cargado
+  if (typeof show_12017670 !== 'function') {
+    console.error("[Monetag] SDK no cargado");
+    estado.adLoading = false;
+    mostrarMensaje("Error: anuncio no disponible");
+    return;
+  }
+
+  show_12017670()
+    .then(() => {
+      // El usuario vio el anuncio → otorgar recompensa
+      estado.adLoading = false;
+      aplicarPista();
+    })
+    .catch((err) => {
+      // El usuario cerró el anuncio o hubo error → sin recompensa
+      estado.adLoading = false;
+      console.warn("[Monetag] Anuncio cancelado o error:", err);
+      mostrarMensaje("Anuncio cancelado");
+    });
 }
 
 function aplicarPista() {
-  // Revela la primera letra no descubierta correctamente
   const fila = estado.filaActual;
   for (let c = 0; c < LONG_PALABRA; c++) {
     const tile = boardEl.children[fila]?.children[c];
@@ -462,14 +489,13 @@ function aplicarPista() {
     const letraActual = tile.textContent;
     const letraCorrecta = estado.palabraSecreta[c];
     if (letraActual !== letraCorrecta) {
-      // Rellenar esa letra en el intento actual
       const intento = (estado.intentos[fila] || "").padEnd(c, "_");
       estado.intentos[fila] = intento.substring(0, c) + letraCorrecta + intento.substring(c + 1);
       actualizarTile(fila, c, letraCorrecta, 'correct');
       actualizarTeclado(letraCorrecta, 'correct');
       estado.letraActual = Math.max(estado.letraActual, c + 1);
       estado.pistaUsada = true;
-      mostrarMensaje("¡Letra revelada!");
+      mostrarMensaje("¡Letra revelada! ", 2000);
       tg?.HapticFeedback?.notificationOccurred?.('success');
       return;
     }
@@ -477,7 +503,7 @@ function aplicarPista() {
 }
 
 /* =========================================================
-   7. CONTADOR DE PARTIDAS + INTERSTITIAL PLACEHOLDER
+   7. MONETAG - INTERSTITIAL (cada 3 partidas)
 ========================================================= */
 function registrarPartida(ganada) {
   const stats = JSON.parse(localStorage.getItem('statsAV') || '{"games":0,"wins":0}');
@@ -489,15 +515,30 @@ function registrarPartida(ganada) {
 
   // Interstitial cada 3 partidas
   if (stats.games % 3 === 0) {
-    mostrarInterstitial();
+    setTimeout(() => mostrarInterstitial(), 1500);
   }
 }
 
 function mostrarInterstitial() {
-  // ⚠️ PLACEHOLDER: integrar red publicitaria real
-  // Ejemplo: AdController.showInterstitial();
-  console.log("[ADS] Interstitial debería mostrarse aquí");
-  mostrarMensaje("📢 (Anuncio interstitial)", 2000);
+  if (estado.adLoading) return;
+  estado.adLoading = true;
+
+  if (typeof show_12017670 !== 'function') {
+    console.error("[Monetag] SDK no cargado");
+    estado.adLoading = false;
+    return;
+  }
+
+  console.log("[Monetag] Mostrando interstitial...");
+  show_12017670()
+    .then(() => {
+      estado.adLoading = false;
+      console.log("[Monetag] Interstitial completado");
+    })
+    .catch((err) => {
+      estado.adLoading = false;
+      console.warn("[Monetag] Interstitial cancelado:", err);
+    });
 }
 
 /* =========================================================
@@ -511,22 +552,23 @@ function nuevaPartida() {
     letraActual: 0,
     terminado: false,
     tecladoEstado: {},
-    pistaUsada: false
+    pistaUsada: false,
+    adLoading: false
   };
   construirTablero();
-  // Resetear teclado visual
   document.querySelectorAll('.key').forEach(k => k.classList.remove('correct','present','absent'));
   msgEl.textContent = '';
-  console.log("[DEBUG] Palabra:", estado.palabraSecreta); // quitar en producción
+  console.log("[DEBUG] Palabra:", estado.palabraSecreta);
 }
 
 document.getElementById('btnReset').onclick = () => {
+  if (estado.adLoading) { mostrarMensaje("Espera el anuncio..."); return; }
   nuevaPartida();
   tg?.HapticFeedback?.impactOccurred?.('light');
 };
 
 /* =========================================================
-   9. INPUT POR TECLADO FÍSICO (útil en pruebas web)
+   9. INPUT POR TECLADO FÍSICO
 ========================================================= */
 document.addEventListener('keydown', (e) => {
   const k = e.key.toUpperCase();
